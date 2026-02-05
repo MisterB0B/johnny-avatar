@@ -37,6 +37,12 @@
     object-fit: cover;
     object-position: center top;
   }
+  .avatar-video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center top;
+  }
 
   /* Speaking glow border */
   .call-screen.speaking {
@@ -238,6 +244,7 @@
 <body>
 
 <div class="call-screen" id="callScreen">
+  <video class="avatar-video" id="avatarVideo" src="scott-adams-talking.mp4" loop muted playsinline style="display:none;"></video>
   <img class="avatar-full" id="avatarFull" src="avatar-scottadams.png" alt="">
   <div class="caller-name" id="callerName">Scott Adams</div>
   <div class="call-duration" id="callDuration">0:00</div>
@@ -272,6 +279,7 @@
 <script>
 const API_BASE = window.location.hostname === 'localhost' ? window.location.origin : 'https://thelightparkapp.com';
 
+const avatarVideo = document.getElementById('avatarVideo');
 const callScreen = document.getElementById('callScreen');
 const avatarFull = document.getElementById('avatarFull');
 const callerName = document.getElementById('callerName');
@@ -297,8 +305,8 @@ let callStartTime = Date.now();
 let durationInterval = null;
 
 const charConfig = {
-  'scott-adams': { name: 'Scott Adams', img: 'avatar-scottadams.png', voice: 'scott-adams', persona: 'scott-adams' },
-  'johnny-robot': { name: 'Johnny', img: 'avatar-robot.png', voice: 'mike-rowe', persona: 'johnny' },
+  'scott-adams': { name: 'Scott Adams', img: 'avatar-scottadams.png', video: API_BASE + '/media/avatar/scott-adams-talking.mp4', voice: 'scott-adams', persona: 'scott-adams' },
+  'johnny-robot': { name: 'Johnny', img: 'avatar-robot.png', video: null, voice: 'mike-rowe', persona: 'johnny' },
 };
 
 // ---- Visualizer bars ----
@@ -337,9 +345,20 @@ durationInterval = setInterval(() => {
 function switchChar(char) {
   currentChar = char;
   const cfg = charConfig[char];
-  avatarFull.src = cfg.img;
   callerName.textContent = cfg.name;
   conversationHistory = [];
+  
+  if (cfg.video) {
+    avatarFull.style.display = 'none';
+    avatarVideo.src = cfg.video;
+    avatarVideo.style.display = 'block';
+    avatarVideo.play().catch(() => {});
+  } else {
+    avatarVideo.style.display = 'none';
+    avatarVideo.pause();
+    avatarFull.style.display = 'block';
+    avatarFull.src = cfg.img;
+  }
   
   document.querySelectorAll('.char-opt').forEach(el => {
     el.classList.toggle('active', el.dataset.char === char);
@@ -446,6 +465,16 @@ async function startCall() {
   callStatus.textContent = 'Connected — just talk';
   callStatus.classList.remove('hidden');
   setTimeout(() => callStatus.classList.add('hidden'), 2000);
+
+  // Switch to video if available
+  const cfg = charConfig[currentChar];
+  if (cfg.video) {
+    avatarFull.style.display = 'none';
+    avatarVideo.src = cfg.video;
+    avatarVideo.style.display = 'block';
+    avatarVideo.muted = true;
+    avatarVideo.play().catch(() => {});
+  }
 
   if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   await audioCtx.resume();
