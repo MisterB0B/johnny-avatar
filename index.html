@@ -3,7 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>Johnny — Voice Call</title>
+<title>Voice Call</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📞</text></svg>">
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -324,6 +325,26 @@
 
   /* Keyboard toggle */
   .cbtn-kb { font-size: 18px; }
+
+  /* Thinking dots */
+  .thinking-dots {
+    display: inline-flex;
+    gap: 4px;
+    align-items: center;
+  }
+  .thinking-dots span {
+    width: 6px;
+    height: 6px;
+    background: rgba(255,255,255,0.6);
+    border-radius: 50%;
+    animation: dotPulse 1.2s ease-in-out infinite;
+  }
+  .thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
+  .thinking-dots span:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes dotPulse {
+    0%, 100% { opacity: 0.3; transform: scale(0.8); }
+    50% { opacity: 1; transform: scale(1.2); }
+  }
 </style>
 </head>
 <body>
@@ -520,8 +541,8 @@ async function startCall(charId) {
     ciStatus.textContent = '🟢 Connected';
     console.log('[CALL] Connected, sending greeting...');
     const greeting = charId === 'scott-adams'
-      ? "Hey Bob. What's on your mind?"
-      : "What's up, Bob?";
+      ? "Hey! Good to see you. What's on your mind?"
+      : "What's up? Talk to me.";
     await speak(greeting);
     console.log('[CALL] Greeting spoken');
   }, 1500);
@@ -608,7 +629,8 @@ async function speak(text) {
       avatarArea.classList.remove('speaking');
       URL.revokeObjectURL(url);
       currentAudio = null;
-      transcript.innerHTML = '';
+      // Fade out transcript after a moment
+      setTimeout(() => { if (!isSpeaking) transcript.innerHTML = ''; }, 2000);
     };
     console.log('[TTS] Playing audio...');
     await audio.play();
@@ -626,6 +648,13 @@ async function speak(text) {
 async function chat(message) {
   const cfg = CHARS[currentChar];
   transcript.innerHTML = `<span class="you-said">You: ${message}</span>`;
+  
+  // Brief pause then show thinking
+  setTimeout(() => {
+    if (!isSpeaking) {
+      transcript.innerHTML = '<span class="thinking-dots"><span></span><span></span><span></span></span>';
+    }
+  }, 600);
 
   try {
     const resp = await fetch(`${API_BASE}/api/chat`, {
