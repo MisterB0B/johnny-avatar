@@ -803,22 +803,139 @@
   const sendBtn = document.getElementById('sendBtn');
   const responseEl = document.getElementById('response');
 
-  // ===== TEXT-TO-SPEECH ENGINE (OpenAI TTS via relay) =====
-  // Try relay server first (AI voice), fall back to browser TTS
-  const TTS_URL = '/api/tts'; // same-origin when served from relay
-  const TTS_FALLBACK_URL = 'https://thelightparkapp.com/api/tts'; // cross-origin fallback
+  // ===== TEXT-TO-SPEECH ENGINE (OpenAI TTS + Robot Voice Processing) =====
+  const TTS_URL = '/api/tts';
+  const TTS_FALLBACK_URL = 'https://thelightparkapp.com/api/tts';
   let currentAudio = null;
+  let audioCtx = null;
+  let sourceNode = null;
+
+  function getAudioCtx() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    return audioCtx;
+  }
+
+  // Build robot voice effects chain
+  function createRobotChain(ctx) {
+    // 1. Ring modulator — multiplies voice with carrier wave for robotic buzz
+    const carrierOsc = ctx.createOscillator();
+    const carrierGain = ctx.createGain();
+    carrierOsc.type = 'sine';
+    carrierOsc.frequency.value = 40; // Low frequency carrier — robotic undertone
+    carrierGain.gain.value = 0.15; // Subtle — not overwhelming
+    carrierOsc.connect(carrierGain);
+    carrierOsc.start();
+
+    // 2. Secondary harmonic for metallic texture
+    const harmOsc = ctx.createOscillator();
+    const harmGain = ctx.createGain();
+    harmOsc.type = 'square';
+    harmOsc.frequency.value = 85;
+    harmGain.gain.value = 0.05; // Very subtle square wave shimmer
+    harmOsc.connect(harmGain);
+    harmOsc.start();
+
+    // 3. Waveshaper for slight distortion / bit-crushed feel
+    const waveshaper = ctx.createWaveShaper();
+    const curve = new Float32Array(256);
+    for (let i = 0; i < 256; i++) {
+      const x = (i * 2) / 256 - 1;
+      // Soft clipping with slight edge
+      curve[i] = (Math.PI + 3.5) * x / (Math.PI + 3.5 * Math.abs(x));
+    }
+    waveshaper.curve = curve;
+    waveshaper.oversample = '2x';
+
+    // 4. Bandpass filter — removes extreme lows/highs, adds "speaker" quality
+    const bandpass = ctx.createBiquadFilter();
+    bandpass.type = 'bandpass';
+    bandpass.frequency.value = 1800;
+    bandpass.Q.value = 0.5;
+
+    // 5. High shelf boost for metallic brightness
+    const highShelf = ctx.createBiquadFilter();
+    highShelf.type = 'highshelf';
+    highShelf.frequency.value = 3000;
+    highShelf.gain.value = 4;
+
+    // 6. Notch filter — creates a "hollow" robotic resonance
+    const notch = ctx.createBiquadFilter();
+    notch.type = 'peaking';
+    notch.frequency.value = 1200;
+    notch.Q.value = 5;
+    notch.gain.value = 8;
+
+    // 7. Slight delay for "electronic echo"
+    const delay = ctx.createDelay();
+    delay.delayTime.value = 0.012; // 12ms — very short, comb filter effect
+    const delayGain = ctx.createGain();
+    delayGain.gain.value = 0.25;
+
+    // 8. Compressor to keep levels even
+    const compressor = ctx.createDynamicsCompressor();
+    compressor.threshold.value = -20;
+    compressor.knee.value = 10;
+    compressor.ratio.value = 4;
+    compressor.attack.value = 0.003;
+    compressor.release.value = 0.1;
+
+    // 9. Output gain
+    const outputGain = ctx.createGain();
+    outputGain.gain.value = 1.3;
+
+    // Dry/wet mix — keep 70% original, 30% robot processing
+    const dryGain = ctx.createGain();
+    dryGain.gain.value = 0.55;
+    const wetGain = ctx.createGain();
+    wetGain.gain.value = 0.45;
+    const merger = ctx.createGain();
+    merger.gain.value = 1;
+
+    return {
+      // Input node — connect source here
+      input: (() => {
+        const input = ctx.createGain();
+        input.gain.value = 1;
+
+        // Dry path (original voice, slightly processed)
+        input.connect(highShelf);
+        highShelf.connect(dryGain);
+        dryGain.connect(merger);
+
+        // Wet path (robot processed)
+        input.connect(waveshaper);
+        waveshaper.connect(notch);
+        notch.connect(delay);
+        delay.connect(delayGain);
+        delayGain.connect(wetGain);
+        notch.connect(wetGain);
+        wetGain.connect(merger);
+
+        // Add carrier modulation to output
+        merger.connect(compressor);
+        carrierGain.connect(compressor);
+        harmGain.connect(compressor);
+        compressor.connect(outputGain);
+        outputGain.connect(ctx.destination);
+
+        return input;
+      })(),
+      stop: () => {
+        carrierOsc.stop();
+        harmOsc.stop();
+      }
+    };
+  }
 
   async function speak(text, onEnd) {
-    // Strip emoji for cleaner TTS
     const cleanText = text.replace(/[\u{1F000}-\u{1FFFF}]|[\u{2600}-\u{27FF}]|[\u{FE00}-\u{FEFF}]|⚡|🤖/gu, '').trim();
     if (!cleanText) { if (onEnd) onEnd(); return; }
 
     // Stop any current audio
     if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+    if (sourceNode) { try { sourceNode.disconnect(); } catch(e){} sourceNode = null; }
 
     try {
-      // Try same-origin first, then cross-origin
       let audioBlob = null;
       for (const url of [TTS_URL, TTS_FALLBACK_URL]) {
         try {
@@ -827,40 +944,47 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ text: cleanText })
           });
-          if (resp.ok) {
-            audioBlob = await resp.blob();
-            break;
-          }
+          if (resp.ok) { audioBlob = await resp.blob(); break; }
         } catch(e) { continue; }
       }
 
       if (audioBlob && audioBlob.size > 0) {
-        // Play OpenAI TTS audio
-        const audioUrl = URL.createObjectURL(audioBlob);
-        currentAudio = new Audio(audioUrl);
-        currentAudio.onplay = () => { startTalking(); startWaveform(); };
-        currentAudio.onended = () => {
-          stopTalking(); stopWaveform();
-          URL.revokeObjectURL(audioUrl);
-          currentAudio = null;
+        const ctx = getAudioCtx();
+        if (ctx.state === 'suspended') await ctx.resume();
+
+        const arrayBuffer = await audioBlob.arrayBuffer();
+        const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+
+        // Create source
+        sourceNode = ctx.createBufferSource();
+        sourceNode.buffer = audioBuffer;
+        sourceNode.playbackRate.value = 1.02; // Tiny speed boost
+
+        // Robot voice chain
+        const chain = createRobotChain(ctx);
+        sourceNode.connect(chain.input);
+
+        startTalking();
+        startWaveform();
+
+        sourceNode.onended = () => {
+          chain.stop();
+          stopTalking();
+          stopWaveform();
+          sourceNode = null;
           if (onEnd) onEnd();
         };
-        currentAudio.onerror = () => {
-          stopTalking(); stopWaveform();
-          currentAudio = null;
-          if (onEnd) onEnd();
-        };
-        await currentAudio.play();
+
+        sourceNode.start(0);
         return;
       }
     } catch(e) {
-      console.log('OpenAI TTS failed, falling back to browser:', e);
+      console.log('Robot TTS failed, falling back to browser:', e);
     }
 
     // Fallback: browser speech synthesis
     const utter = new SpeechSynthesisUtterance(cleanText);
-    utter.rate = 1.05;
-    utter.pitch = 0.9;
+    utter.rate = 1.05; utter.pitch = 0.9;
     utter.onstart = () => { startTalking(); startWaveform(); };
     utter.onend = () => { stopTalking(); stopWaveform(); if (onEnd) onEnd(); };
     utter.onerror = () => { stopTalking(); stopWaveform(); if (onEnd) onEnd(); };
