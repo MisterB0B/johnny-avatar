@@ -265,9 +265,13 @@
       <img src="avatar-scottadams.png" alt=""><br>
       <span class="char-label">Scott Adams</span>
     </div>
+    <div class="char-opt" data-char="human-johnny" onclick="switchChar('human-johnny')">
+      <img src="avatar-mikerowe.png" alt=""><br>
+      <span class="char-label">Johnny</span>
+    </div>
     <div class="char-opt" data-char="johnny-robot" onclick="switchChar('johnny-robot')">
       <img src="avatar-robot.png" alt=""><br>
-      <span class="char-label">Johnny</span>
+      <span class="char-label">Robot</span>
     </div>
   </div>
 </div>
@@ -283,7 +287,6 @@ import { SimliClient } from 'https://esm.sh/simli-client@1';
 
 const API_BASE = window.location.hostname === 'localhost' ? window.location.origin : 'https://thelightparkapp.com';
 const SIMLI_API_KEY = '4u6mskzv885717ep28vb0p';
-const SIMLI_FACE_ID = 'e242cb3b-60a8-44f8-b2bd-5f99ad065a30';
 
 let simliClient = null;
 let simliReady = false;
@@ -314,8 +317,9 @@ let callStartTime = Date.now();
 let durationInterval = null;
 
 const charConfig = {
-  'scott-adams': { name: 'Scott Adams', img: 'avatar-scottadams.png', video: API_BASE + '/media/avatar/scott-adams-talking.mp4', voice: 'scott-adams', persona: 'scott-adams' },
-  'johnny-robot': { name: 'Johnny', img: 'avatar-robot.png', video: null, voice: 'mike-rowe', persona: 'johnny' },
+  'scott-adams': { name: 'Scott Adams', img: 'avatar-scottadams.png', video: API_BASE + '/media/avatar/scott-adams-talking.mp4', voice: 'scott-adams', persona: 'scott-adams', faceId: 'e242cb3b-60a8-44f8-b2bd-5f99ad065a30' },
+  'human-johnny': { name: 'Johnny', img: 'avatar-mikerowe.png', video: null, voice: 'mike-rowe', persona: 'johnny', faceId: 'PENDING' }, // Face ID pending Simli processing
+  'johnny-robot': { name: 'Robot Johnny', img: 'avatar-robot.png', video: null, voice: 'johnny5', persona: 'johnny', faceId: null }, // No Simli - robot face won't lip-sync
 };
 
 // ---- Visualizer bars ----
@@ -352,7 +356,7 @@ durationInterval = setInterval(() => {
 
 // ---- Character switching ----
 function switchChar(char) {
-  // Clean up Simli if switching away from Scott Adams
+  // Clean up Simli when switching characters
   if (simliClient) {
     try { simliClient.close(); } catch(e) {}
     simliClient = null;
@@ -375,8 +379,9 @@ function switchChar(char) {
   });
   charSwitcher.classList.remove('show');
 
-  // If call is active and switching to Scott Adams, start Simli
-  if (callActive && char === 'scott-adams') {
+  // If call is active and character has Simli, restart call to init Simli
+  const hasSimli = cfg.faceId && cfg.faceId !== 'PENDING' && cfg.faceId !== null;
+  if (callActive && hasSimli) {
     startCall();
   }
 }
@@ -437,8 +442,8 @@ async function speak(text) {
     if (!resp.ok) throw new Error('TTS failed');
     const blob = await resp.blob();
 
-    // If Simli is active (Scott Adams), feed audio to lip-sync
-    if (simliReady && simliClient && currentChar === 'scott-adams') {
+    // If Simli is active, feed audio to lip-sync
+    if (simliReady && simliClient) {
       console.log('[SIMLI] Converting TTS audio to PCM16...');
       try {
         const pcm16 = await mp3ToPcm16(blob);
@@ -580,17 +585,19 @@ async function startCall() {
 
   const cfg = charConfig[currentChar];
 
-  // Scott Adams = Simli real-time lip-sync
-  if (currentChar === 'scott-adams') {
+  // Check if character has Simli lip-sync (valid faceId)
+  const hasSimli = cfg.faceId && cfg.faceId !== 'PENDING' && cfg.faceId !== null;
+  
+  if (hasSimli) {
     try {
-      console.log('[SIMLI] Initializing...');
+      console.log(`[SIMLI] Initializing for ${cfg.name} with face: ${cfg.faceId}...`);
       const simliVideoEl = document.getElementById('simliVideo');
       const simliAudioEl = document.getElementById('simliAudio');
       
       simliClient = new SimliClient();
       simliClient.Initialize({
         apiKey: SIMLI_API_KEY,
-        faceID: SIMLI_FACE_ID,
+        faceID: cfg.faceId,
         handleSilence: true,
         maxSessionLength: 3600,
         maxIdleTime: 600,
@@ -600,20 +607,20 @@ async function startCall() {
       });
 
       simliClient.on('connected', () => {
-        console.log('[SIMLI] Connected! Real-time lip-sync active.');
+        console.log(`[SIMLI] Connected! Real-time lip-sync active for ${cfg.name}.`);
         simliReady = true;
-        callStatus.textContent = 'Connected — Live Lip-Sync';
+        callStatus.textContent = `Connected — ${cfg.name} Live`;
         setTimeout(() => callStatus.classList.add('hidden'), 2000);
       });
       simliClient.on('failed', () => {
-        console.error('[SIMLI] Connection failed, falling back to video loop');
+        console.error('[SIMLI] Connection failed, falling back to static image');
         simliReady = false;
-        // Fallback to video loop
+        // Fallback to static image
         simliVideoEl.style.display = 'none';
-        avatarVideo.src = cfg.video;
-        avatarVideo.style.display = 'block';
-        avatarVideo.muted = true;
-        avatarVideo.play().catch(() => {});
+        avatarFull.style.display = 'block';
+        avatarFull.src = cfg.img;
+        callStatus.textContent = 'Connected (no lip-sync)';
+        setTimeout(() => callStatus.classList.add('hidden'), 2000);
       });
 
       await simliClient.start();
@@ -626,20 +633,19 @@ async function startCall() {
     } catch (e) {
       console.error('[SIMLI] Init error:', e);
       simliReady = false;
-      // Fallback
-      avatarFull.style.display = 'none';
-      avatarVideo.src = cfg.video;
-      avatarVideo.style.display = 'block';
-      avatarVideo.muted = true;
-      avatarVideo.play().catch(() => {});
-      callStatus.textContent = 'Connected';
+      // Fallback to static image
+      avatarFull.style.display = 'block';
+      avatarFull.src = cfg.img;
+      avatarVideo.style.display = 'none';
+      callStatus.textContent = 'Connected (no lip-sync)';
       setTimeout(() => callStatus.classList.add('hidden'), 2000);
     }
   } else {
-    // Johnny = static image (no Simli)
+    // No Simli = static image only
     avatarFull.style.display = 'block';
     avatarFull.src = cfg.img;
-    callStatus.textContent = 'Connected';
+    avatarVideo.style.display = 'none';
+    callStatus.textContent = `Connected — ${cfg.name}`;
     setTimeout(() => callStatus.classList.add('hidden'), 2000);
   }
 
