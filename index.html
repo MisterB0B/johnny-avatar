@@ -803,42 +803,68 @@
   const sendBtn = document.getElementById('sendBtn');
   const responseEl = document.getElementById('response');
 
-  // ===== TEXT-TO-SPEECH ENGINE =====
-  let voices = [];
-  let preferredVoice = null;
+  // ===== TEXT-TO-SPEECH ENGINE (OpenAI TTS via relay) =====
+  // Try relay server first (AI voice), fall back to browser TTS
+  const TTS_URL = '/api/tts'; // same-origin when served from relay
+  const TTS_FALLBACK_URL = 'https://thelightparkapp.com/api/tts'; // cross-origin fallback
+  let currentAudio = null;
 
-  function loadVoices() {
-    voices = speechSynthesis.getVoices();
-    // Prefer a good English voice - try for something with character
-    const prefs = ['Daniel', 'Alex', 'Samantha', 'Google UK English Male', 'Microsoft Mark', 'Aaron', 'Fred'];
-    for (const name of prefs) {
-      const v = voices.find(v => v.name.includes(name));
-      if (v) { preferredVoice = v; break; }
-    }
-    if (!preferredVoice && voices.length > 0) {
-      preferredVoice = voices.find(v => v.lang.startsWith('en')) || voices[0];
-    }
-    console.log('TTS voice:', preferredVoice?.name || 'none', `(${voices.length} available)`);
-  }
-
-  speechSynthesis.onvoiceschanged = loadVoices;
-  loadVoices();
-
-  function speak(text, onEnd) {
+  async function speak(text, onEnd) {
     // Strip emoji for cleaner TTS
     const cleanText = text.replace(/[\u{1F000}-\u{1FFFF}]|[\u{2600}-\u{27FF}]|[\u{FE00}-\u{FEFF}]|⚡|🤖/gu, '').trim();
     if (!cleanText) { if (onEnd) onEnd(); return; }
 
+    // Stop any current audio
+    if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+
+    try {
+      // Try same-origin first, then cross-origin
+      let audioBlob = null;
+      for (const url of [TTS_URL, TTS_FALLBACK_URL]) {
+        try {
+          const resp = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: cleanText })
+          });
+          if (resp.ok) {
+            audioBlob = await resp.blob();
+            break;
+          }
+        } catch(e) { continue; }
+      }
+
+      if (audioBlob && audioBlob.size > 0) {
+        // Play OpenAI TTS audio
+        const audioUrl = URL.createObjectURL(audioBlob);
+        currentAudio = new Audio(audioUrl);
+        currentAudio.onplay = () => { startTalking(); startWaveform(); };
+        currentAudio.onended = () => {
+          stopTalking(); stopWaveform();
+          URL.revokeObjectURL(audioUrl);
+          currentAudio = null;
+          if (onEnd) onEnd();
+        };
+        currentAudio.onerror = () => {
+          stopTalking(); stopWaveform();
+          currentAudio = null;
+          if (onEnd) onEnd();
+        };
+        await currentAudio.play();
+        return;
+      }
+    } catch(e) {
+      console.log('OpenAI TTS failed, falling back to browser:', e);
+    }
+
+    // Fallback: browser speech synthesis
     const utter = new SpeechSynthesisUtterance(cleanText);
-    if (preferredVoice) utter.voice = preferredVoice;
     utter.rate = 1.05;
     utter.pitch = 0.9;
-
     utter.onstart = () => { startTalking(); startWaveform(); };
     utter.onend = () => { stopTalking(); stopWaveform(); if (onEnd) onEnd(); };
     utter.onerror = () => { stopTalking(); stopWaveform(); if (onEnd) onEnd(); };
-
-    speechSynthesis.cancel(); // kill any queued speech
+    speechSynthesis.cancel();
     speechSynthesis.speak(utter);
   }
 
