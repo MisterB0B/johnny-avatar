@@ -245,6 +245,8 @@
 
 <div class="call-screen" id="callScreen">
   <video class="avatar-video" id="avatarVideo" src="scott-adams-talking.mp4" loop muted playsinline style="display:none;"></video>
+  <video class="avatar-video" id="simliVideo" autoplay playsinline style="display:none;"></video>
+  <audio id="simliAudio" autoplay style="display:none;"></audio>
   <img class="avatar-full" id="avatarFull" src="avatar-scottadams.png" alt="">
   <div class="caller-name" id="callerName">Scott Adams</div>
   <div class="call-duration" id="callDuration">0:00</div>
@@ -276,8 +278,15 @@
   <button class="ctrl-btn btn-end" id="btnEnd" title="End call">📞</button>
 </div>
 
-<script>
+<script type="module">
+import { SimliClient } from 'https://esm.sh/simli-client@1';
+
 const API_BASE = window.location.hostname === 'localhost' ? window.location.origin : 'https://thelightparkapp.com';
+const SIMLI_API_KEY = '4u6mskzv885717ep28vb0p';
+const SIMLI_FACE_ID = 'e242cb3b-60a8-44f8-b2bd-5f99ad065a30';
+
+let simliClient = null;
+let simliReady = false;
 
 const avatarVideo = document.getElementById('avatarVideo');
 const callScreen = document.getElementById('callScreen');
@@ -343,28 +352,36 @@ durationInterval = setInterval(() => {
 
 // ---- Character switching ----
 function switchChar(char) {
+  // Clean up Simli if switching away from Scott Adams
+  if (simliClient) {
+    try { simliClient.close(); } catch(e) {}
+    simliClient = null;
+    simliReady = false;
+    document.getElementById('simliVideo').style.display = 'none';
+  }
+
   currentChar = char;
   const cfg = charConfig[char];
   callerName.textContent = cfg.name;
   conversationHistory = [];
   
-  if (cfg.video) {
-    avatarFull.style.display = 'none';
-    avatarVideo.src = cfg.video;
-    avatarVideo.style.display = 'block';
-    avatarVideo.play().catch(() => {});
-  } else {
-    avatarVideo.style.display = 'none';
-    avatarVideo.pause();
-    avatarFull.style.display = 'block';
-    avatarFull.src = cfg.img;
-  }
+  avatarVideo.style.display = 'none';
+  avatarVideo.pause();
+  avatarFull.style.display = 'block';
+  avatarFull.src = cfg.img;
   
   document.querySelectorAll('.char-opt').forEach(el => {
     el.classList.toggle('active', el.dataset.char === char);
   });
   charSwitcher.classList.remove('show');
+
+  // If call is active and switching to Scott Adams, start Simli
+  if (callActive && char === 'scott-adams') {
+    startCall();
+  }
 }
+// Expose functions for onclick handlers (module scope)
+window.switchChar = switchChar;
 
 btnSwitch.addEventListener('click', () => {
   charSwitcher.classList.toggle('show');
@@ -375,6 +392,33 @@ callScreen.addEventListener('click', (e) => {
     charSwitcher.classList.remove('show');
   }
 });
+
+// ---- Convert MP3 blob to PCM16 16KHz for Simli ----
+async function mp3ToPcm16(blob) {
+  const arrayBuf = await blob.arrayBuffer();
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const decoded = await audioCtx.decodeAudioData(arrayBuf);
+  
+  // Get mono channel
+  const channelData = decoded.getChannelData(0);
+  const origRate = decoded.sampleRate;
+  const targetRate = 16000;
+  
+  // Resample to 16KHz
+  const ratio = origRate / targetRate;
+  const newLength = Math.floor(channelData.length / ratio);
+  const pcm16 = new Uint8Array(newLength * 2); // 2 bytes per sample
+  const view = new DataView(pcm16.buffer);
+  
+  for (let i = 0; i < newLength; i++) {
+    const srcIdx = Math.floor(i * ratio);
+    const sample = Math.max(-1, Math.min(1, channelData[srcIdx]));
+    const int16 = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
+    view.setInt16(i * 2, int16, true); // little-endian
+  }
+  
+  return pcm16;
+}
 
 // ---- TTS ----
 async function speak(text) {
@@ -392,32 +436,62 @@ async function speak(text) {
 
     if (!resp.ok) throw new Error('TTS failed');
     const blob = await resp.blob();
-    const url = URL.createObjectURL(blob);
 
-    if (currentAudio) { currentAudio.pause(); currentAudio = null; }
-    const audio = new Audio(url);
-    currentAudio = audio;
-
-    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    const source = audioCtx.createMediaElementSource(audio);
-    analyser = audioCtx.createAnalyser();
-    analyser.fftSize = 128;
-    source.connect(analyser);
-    analyser.connect(audioCtx.destination);
-
-    audio.onended = () => {
-      isSpeaking = false;
-      callScreen.classList.remove('speaking');
-      URL.revokeObjectURL(url);
-      currentAudio = null;
-    };
-
-    await audio.play();
+    // If Simli is active (Scott Adams), feed audio to lip-sync
+    if (simliReady && simliClient && currentChar === 'scott-adams') {
+      console.log('[SIMLI] Converting TTS audio to PCM16...');
+      try {
+        const pcm16 = await mp3ToPcm16(blob);
+        // Send in chunks (6000 bytes ~187ms at 16KHz)
+        const chunkSize = 6000;
+        for (let i = 0; i < pcm16.length; i += chunkSize) {
+          const chunk = pcm16.slice(i, Math.min(i + chunkSize, pcm16.length));
+          simliClient.sendAudioData(chunk);
+        }
+        console.log(`[SIMLI] Sent ${pcm16.length} bytes of PCM16 audio`);
+        
+        // Estimate duration for speaking state
+        const durationMs = (pcm16.length / 2) / 16000 * 1000;
+        setTimeout(() => {
+          isSpeaking = false;
+          callScreen.classList.remove('speaking');
+        }, durationMs + 500);
+      } catch (e) {
+        console.error('[SIMLI] Audio conversion error, falling back to regular playback:', e);
+        await playAudioFallback(blob);
+      }
+    } else {
+      // Regular audio playback (Johnny or Simli not ready)
+      await playAudioFallback(blob);
+    }
   } catch (e) {
     console.error('TTS error:', e);
     isSpeaking = false;
     callScreen.classList.remove('speaking');
   }
+}
+
+async function playAudioFallback(blob) {
+  const url = URL.createObjectURL(blob);
+  if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+  const audio = new Audio(url);
+  currentAudio = audio;
+
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const source = audioCtx.createMediaElementSource(audio);
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 128;
+  source.connect(analyser);
+  analyser.connect(audioCtx.destination);
+
+  audio.onended = () => {
+    isSpeaking = false;
+    callScreen.classList.remove('speaking');
+    URL.revokeObjectURL(url);
+    currentAudio = null;
+  };
+
+  await audio.play();
 }
 
 // ---- Chat ----
@@ -496,23 +570,77 @@ function makeRecognition() {
 
 async function startCall() {
   callActive = true;
-  // Visual stays ON forever — never toggles
   btnMic.classList.add('active');
   listeningIndicator.classList.add('active');
-  callStatus.textContent = 'Connected';
+  callStatus.textContent = 'Connecting...';
   callStatus.classList.remove('hidden');
-  setTimeout(() => callStatus.classList.add('hidden'), 2000);
 
   if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   await audioCtx.resume();
 
   const cfg = charConfig[currentChar];
-  if (cfg.video) {
-    avatarFull.style.display = 'none';
-    avatarVideo.src = cfg.video;
-    avatarVideo.style.display = 'block';
-    avatarVideo.muted = true;
-    avatarVideo.play().catch(() => {});
+
+  // Scott Adams = Simli real-time lip-sync
+  if (currentChar === 'scott-adams') {
+    try {
+      console.log('[SIMLI] Initializing...');
+      const simliVideoEl = document.getElementById('simliVideo');
+      const simliAudioEl = document.getElementById('simliAudio');
+      
+      simliClient = new SimliClient();
+      simliClient.Initialize({
+        apiKey: SIMLI_API_KEY,
+        faceID: SIMLI_FACE_ID,
+        handleSilence: true,
+        maxSessionLength: 3600,
+        maxIdleTime: 600,
+        videoRef: simliVideoEl,
+        audioRef: simliAudioEl,
+        enableConsoleLogs: true,
+      });
+
+      simliClient.on('connected', () => {
+        console.log('[SIMLI] Connected! Real-time lip-sync active.');
+        simliReady = true;
+        callStatus.textContent = 'Connected — Live Lip-Sync';
+        setTimeout(() => callStatus.classList.add('hidden'), 2000);
+      });
+      simliClient.on('failed', () => {
+        console.error('[SIMLI] Connection failed, falling back to video loop');
+        simliReady = false;
+        // Fallback to video loop
+        simliVideoEl.style.display = 'none';
+        avatarVideo.src = cfg.video;
+        avatarVideo.style.display = 'block';
+        avatarVideo.muted = true;
+        avatarVideo.play().catch(() => {});
+      });
+
+      await simliClient.start();
+
+      // Show Simli video, hide others
+      avatarFull.style.display = 'none';
+      avatarVideo.style.display = 'none';
+      simliVideoEl.style.display = 'block';
+
+    } catch (e) {
+      console.error('[SIMLI] Init error:', e);
+      simliReady = false;
+      // Fallback
+      avatarFull.style.display = 'none';
+      avatarVideo.src = cfg.video;
+      avatarVideo.style.display = 'block';
+      avatarVideo.muted = true;
+      avatarVideo.play().catch(() => {});
+      callStatus.textContent = 'Connected';
+      setTimeout(() => callStatus.classList.add('hidden'), 2000);
+    }
+  } else {
+    // Johnny = static image (no Simli)
+    avatarFull.style.display = 'block';
+    avatarFull.src = cfg.img;
+    callStatus.textContent = 'Connected';
+    setTimeout(() => callStatus.classList.add('hidden'), 2000);
   }
 
   recognition = makeRecognition();
@@ -528,6 +656,16 @@ function endCall() {
   if (currentAudio) { currentAudio.pause(); currentAudio = null; }
   isSpeaking = false;
   callScreen.classList.remove('speaking');
+
+  // Clean up Simli
+  if (simliClient) {
+    try { simliClient.close(); } catch(e) { console.log('[SIMLI] Close error:', e); }
+    simliClient = null;
+    simliReady = false;
+  }
+  document.getElementById('simliVideo').style.display = 'none';
+  avatarFull.style.display = 'block';
+  avatarFull.src = charConfig[currentChar].img;
 }
 
 btnMic.addEventListener('click', () => {
