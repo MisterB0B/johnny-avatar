@@ -448,25 +448,64 @@ async function chat(message) {
   }
 }
 
-// ---- Always-On Mic via getUserMedia + Whisper ----
+// ---- Bulletproof Always-On Mic ----
+// Uses Web Speech API but NEVER shows restart visually
 let callActive = false;
-let mediaStream = null;
-let mediaRecorder = null;
-let audioChunks = [];
-let isTalking = false;
-let silenceStart = 0;
-const SILENCE_THRESHOLD = 0.015;
-const SILENCE_DURATION = 1800; // 1.8s silence = send
+let recognition = null;
+let pendingText = '';
+let sendTimer = null;
+
+function makeRecognition() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) return null;
+  const r = new SR();
+  r.continuous = true;
+  r.interimResults = true;
+  r.lang = 'en-US';
+  
+  r.onresult = (e) => {
+    if (!callActive) return;
+    let final = '', interim = '';
+    for (let i = 0; i < e.results.length; i++) {
+      if (e.results[i].isFinal) final += e.results[i][0].transcript;
+      else interim += e.results[i][0].transcript;
+    }
+    if (final || interim) {
+      transcript.innerHTML = `<span class="you">${final || interim}</span>`;
+      callStatus.classList.add('hidden');
+    }
+    if (final.trim()) {
+      pendingText = final.trim();
+      if (isSpeaking && currentAudio) {
+        currentAudio.pause(); currentAudio = null;
+        isSpeaking = false; callScreen.classList.remove('speaking');
+      }
+      clearTimeout(sendTimer);
+      sendTimer = setTimeout(() => {
+        if (pendingText) { const m = pendingText; pendingText = ''; chat(m); }
+      }, 1500);
+    }
+  };
+  
+  // SILENT restart — no visual change ever
+  r.onend = () => { if (callActive) setTimeout(() => { if (callActive) try { r.start(); } catch(e) { setTimeout(() => { if (callActive) try { r.start(); } catch(e2){} }, 300); } }, 50); };
+  r.onerror = () => { if (callActive) setTimeout(() => { if (callActive) try { r.start(); } catch(e) { setTimeout(() => { if (callActive) try { r.start(); } catch(e2){} }, 500); } }, 200); };
+  
+  return r;
+}
 
 async function startCall() {
   callActive = true;
+  // Visual stays ON forever — never toggles
   btnMic.classList.add('active');
   listeningIndicator.classList.add('active');
-  callStatus.textContent = 'Connected — just talk';
+  callStatus.textContent = 'Connected';
   callStatus.classList.remove('hidden');
   setTimeout(() => callStatus.classList.add('hidden'), 2000);
 
-  // Switch to video if available
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  await audioCtx.resume();
+
   const cfg = charConfig[currentChar];
   if (cfg.video) {
     avatarFull.style.display = 'none';
@@ -476,85 +515,16 @@ async function startCall() {
     avatarVideo.play().catch(() => {});
   }
 
-  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  await audioCtx.resume();
-
-  // Grab mic — stays on the ENTIRE call
-  mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  
-  // Silence detection
-  const micSource = audioCtx.createMediaStreamSource(mediaStream);
-  const detector = audioCtx.createAnalyser();
-  detector.fftSize = 512;
-  micSource.connect(detector);
-  const buf = new Float32Array(detector.fftSize);
-
-  function monitor() {
-    if (!callActive) return;
-    detector.getFloatTimeDomainData(buf);
-    let sum = 0;
-    for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
-    const rms = Math.sqrt(sum / buf.length);
-
-    if (rms > SILENCE_THRESHOLD) {
-      if (!isTalking) {
-        isTalking = true;
-        audioChunks = [];
-        // Interrupt AI if speaking
-        if (isSpeaking && currentAudio) {
-          currentAudio.pause(); currentAudio = null;
-          isSpeaking = false; callScreen.classList.remove('speaking');
-        }
-        // Start recording
-        mediaRecorder = new MediaRecorder(mediaStream, { mimeType: MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/mp4' });
-        mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunks.push(e.data); };
-        mediaRecorder.start(100);
-      }
-      silenceStart = Date.now();
-    } else if (isTalking && Date.now() - silenceStart > SILENCE_DURATION) {
-      isTalking = false;
-      if (mediaRecorder && mediaRecorder.state === 'recording') {
-        mediaRecorder.onstop = async () => {
-          if (audioChunks.length === 0) return;
-          const blob = new Blob(audioChunks, { type: mediaRecorder.mimeType });
-          audioChunks = [];
-          if (blob.size < 4000) return; // skip tiny
-          
-          transcript.innerHTML = '<span class="you">...</span>';
-          try {
-            const fd = new FormData();
-            fd.append('file', blob, 'audio.webm');
-            fd.append('model', 'whisper-1');
-            fd.append('language', 'en');
-            const resp = await fetch(`${API_BASE}/api/transcribe`, { method: 'POST', body: fd });
-            const data = await resp.json();
-            const text = data.text?.trim();
-            if (text && text.length > 1) {
-              transcript.innerHTML = `<span class="you">${text}</span>`;
-              chat(text);
-            } else {
-              transcript.innerHTML = '';
-            }
-          } catch(e) {
-            console.error('Transcribe error:', e);
-            transcript.innerHTML = '';
-          }
-        };
-        mediaRecorder.stop();
-      }
-    }
-    requestAnimationFrame(monitor);
-  }
-  monitor();
+  recognition = makeRecognition();
+  if (recognition) try { recognition.start(); } catch(e) {}
 }
 
 function endCall() {
   callActive = false;
-  isTalking = false;
   btnMic.classList.remove('active');
   listeningIndicator.classList.remove('active');
-  if (mediaRecorder && mediaRecorder.state === 'recording') try { mediaRecorder.stop(); } catch(e) {}
-  if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
+  if (recognition) try { recognition.abort(); } catch(e) {}
+  recognition = null;
   if (currentAudio) { currentAudio.pause(); currentAudio = null; }
   isSpeaking = false;
   callScreen.classList.remove('speaking');
@@ -566,9 +536,7 @@ btnMic.addEventListener('click', () => {
       currentAudio.pause(); currentAudio = null;
       isSpeaking = false; callScreen.classList.remove('speaking');
     }
-  } else {
-    startCall();
-  }
+  } else { startCall(); }
 });
 
 btnEnd.addEventListener('click', () => {
@@ -576,11 +544,11 @@ btnEnd.addEventListener('click', () => {
   callStartTime = Date.now();
   conversationHistory = [];
   transcript.innerHTML = '';
-  callStatus.textContent = 'Call ended — tap 🎤 to call again';
+  callStatus.textContent = 'Tap 🎤 to call again';
   callStatus.classList.remove('hidden');
 });
 
-callStatus.textContent = 'Tap 🎤 to start the call';
+callStatus.textContent = 'Tap 🎤 to start';
 </script>
 </body>
 </html>
