@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>Voice Call</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📞</text></svg>">
+<link rel="preload" href="https://thelightparkapp.com/media/avatar/scott-adams-talking.mp4" as="video" type="video/mp4">
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -38,6 +39,12 @@
     color: #888;
     font-size: 14px;
     margin-top: -30px;
+  }
+  .start-screen .tagline {
+    font-size: 11px;
+    color: #555;
+    margin-top: 8px;
+    letter-spacing: 0.5px;
   }
   .contacts {
     display: flex;
@@ -99,8 +106,10 @@
     background: #000;
     flex-direction: column;
     z-index: 100;
+    opacity: 0;
+    transition: opacity 0.4s ease;
   }
-  .call-screen.active { display: flex; }
+  .call-screen.active { display: flex; opacity: 1; }
 
   .avatar-area {
     flex: 1;
@@ -263,8 +272,9 @@
     background: #ef4444 !important;
     width: 64px;
     height: 64px;
-    font-size: 26px;
+    font-size: 24px;
   }
+  .cbtn-end span { font-size: 11px; display: block; margin-top: 1px; }
   .cbtn-mic.live {
     background: #ef4444;
     animation: micGlow 2s ease-in-out infinite;
@@ -373,6 +383,7 @@
       <div class="call-badge">📞 Call</div>
     </div>
   </div>
+  <div class="tagline">AI-powered voice conversations</div>
 </div>
 
 <!-- ===== CALL SCREEN ===== -->
@@ -407,7 +418,7 @@
   <div class="call-controls">
     <button class="cbtn cbtn-mute" id="btnMute" title="Mute yourself">🔇</button>
     <button class="cbtn cbtn-mic live" id="btnMic" title="Mic is on">🎤</button>
-    <button class="cbtn cbtn-end" id="btnEnd" title="End call">📞</button>
+    <button class="cbtn cbtn-end" id="btnEnd" title="End call">📞<span>End</span></button>
     <button class="cbtn cbtn-kb" id="btnKeyboard" title="Type instead">⌨️</button>
   </div>
 </div>
@@ -491,18 +502,26 @@ async function startCall(charId) {
   ciName.textContent = cfg.name;
   ciStatus.textContent = 'Connecting…';
 
-  // Set avatar
+  // Set avatar (with video error fallback to static image)
+  avatarImg.src = cfg.img; // Always preload the static image as fallback
   if (cfg.video) {
     avatarImg.style.display = 'none';
     avatarVid.src = cfg.video;
     avatarVid.style.display = 'block';
     avatarVid.muted = true;
-    avatarVid.play().catch(() => {});
+    avatarVid.onerror = () => {
+      console.log('[CALL] Video failed to load, falling back to static image');
+      avatarVid.style.display = 'none';
+      avatarImg.style.display = 'block';
+    };
+    avatarVid.play().catch(() => {
+      avatarVid.style.display = 'none';
+      avatarImg.style.display = 'block';
+    });
   } else {
     avatarVid.style.display = 'none';
     avatarVid.pause();
     avatarImg.style.display = 'block';
-    avatarImg.src = cfg.img;
   }
 
   // Audio context — MUST unlock on the user gesture (tap) immediately
@@ -558,16 +577,24 @@ function endCall() {
   clearInterval(timerInterval);
   clearTimeout(sendTimer);
 
-  // Reset UI
-  callScreen.classList.remove('active');
-  startScreen.style.display = '';
-  avatarArea.classList.remove('speaking');
-  listenDots.classList.remove('on');
-  btnMic.classList.remove('live');
-  btnMute.classList.remove('muted');
-  isMuted = false;
-  transcript.innerHTML = '';
-  history = [];
+  // Fade out call screen
+  callScreen.style.opacity = '0';
+  setTimeout(() => {
+    callScreen.classList.remove('active');
+    callScreen.style.opacity = '';
+    startScreen.style.display = '';
+    avatarArea.classList.remove('speaking');
+    listenDots.classList.remove('on');
+    btnMic.classList.remove('live');
+    btnMute.classList.remove('muted');
+    textInputBar.classList.remove('show');
+    isMuted = false;
+    transcript.innerHTML = '';
+    history = [];
+    // Stop video
+    avatarVid.pause();
+    avatarVid.src = '';
+  }, 400);
 }
 
 btnEnd.addEventListener('click', endCall);
@@ -733,7 +760,10 @@ function startListening() {
   };
   recognition.onerror = (e) => {
     if (e.error === 'not-allowed') {
-      transcript.innerHTML = '⚠️ Mic permission denied — check browser settings';
+      // Show keyboard fallback instead of scary error
+      textInputBar.classList.add('show');
+      transcript.innerHTML = '🎤 Mic not available — type your message below';
+      setTimeout(() => { if (!isSpeaking) transcript.innerHTML = ''; }, 4000);
       return;
     }
     if (isListening && !isMuted) {
