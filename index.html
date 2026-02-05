@@ -949,33 +949,22 @@
       }
 
       if (audioBlob && audioBlob.size > 0) {
-        const ctx = getAudioCtx();
-        if (ctx.state === 'suspended') await ctx.resume();
-
-        const arrayBuffer = await audioBlob.arrayBuffer();
-        const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
-
-        // Create source
-        sourceNode = ctx.createBufferSource();
-        sourceNode.buffer = audioBuffer;
-        sourceNode.playbackRate.value = 1.02; // Tiny speed boost
-
-        // Robot voice chain
-        const chain = createRobotChain(ctx);
-        sourceNode.connect(chain.input);
-
-        startTalking();
-        startWaveform();
-
-        sourceNode.onended = () => {
-          chain.stop();
-          stopTalking();
-          stopWaveform();
-          sourceNode = null;
+        // Clean playback — no robot effects, just the AI voice
+        const audioUrl = URL.createObjectURL(audioBlob);
+        currentAudio = new Audio(audioUrl);
+        currentAudio.onplay = () => { startTalking(); startWaveform(); };
+        currentAudio.onended = () => {
+          stopTalking(); stopWaveform();
+          URL.revokeObjectURL(audioUrl);
+          currentAudio = null;
           if (onEnd) onEnd();
         };
-
-        sourceNode.start(0);
+        currentAudio.onerror = () => {
+          stopTalking(); stopWaveform();
+          currentAudio = null;
+          if (onEnd) onEnd();
+        };
+        await currentAudio.play();
         return;
       }
     } catch(e) {
