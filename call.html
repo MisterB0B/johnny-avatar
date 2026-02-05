@@ -465,11 +465,14 @@ if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
       pendingText = finalText.trim();
       clearTimeout(silenceTimer);
       silenceTimer = setTimeout(() => {
-        if (pendingText && !isSpeaking) {
+        if (pendingText) {
           const toSend = pendingText;
           pendingText = '';
-          // Stop listening while AI responds
-          pauseListening();
+          // Interrupt if AI is speaking
+          if (isSpeaking && currentAudio) {
+            currentAudio.pause(); currentAudio = null;
+            isSpeaking = false; callScreen.classList.remove('speaking');
+          }
           chat(toSend);
         }
       }, 1500); // 1.5s of silence = done talking
@@ -520,16 +523,8 @@ function pauseListening() {
   }
 }
 
-// Override speak to auto-resume listening when done
-const _origSpeak = speak;
-speak = async function(text) {
-  pauseListening();
-  await _origSpeak(text);
-  // Auto-resume listening after response
-  if (callActive) {
-    setTimeout(() => startListening(), 500);
-  }
-};
+// Mic stays on during speech — never pause it
+// User can interrupt naturally by talking over the AI
 
 // ---- Start/Stop Call ----
 function startCall() {
