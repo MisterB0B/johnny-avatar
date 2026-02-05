@@ -247,8 +247,8 @@
 <div class="header">
   <h1>⚡ JOHNNY</h1>
   <select class="voice-select" id="voiceSelect">
-    <option value="mike-rowe">🔧 Mike Rowe</option>
     <option value="scott-adams">📐 Scott Adams</option>
+    <option value="mike-rowe">🔧 Mike Rowe</option>
     <option value="johnny5">🤖 Johnny 5</option>
     <option value="mark-dancer">🎭 Mark Dancer</option>
     <option value="jack-marlowe">🎬 Jack Marlowe</option>
@@ -276,7 +276,8 @@
 </div>
 
 <script>
-const API_BASE = window.location.origin;
+// Use relay server for API — GitHub Pages can't run backend
+const API_BASE = window.location.hostname === 'localhost' ? window.location.origin : 'https://thelightparkapp.com';
 const chatHistory = document.getElementById('chatHistory');
 const chatInput = document.getElementById('chatInput');
 const sendBtn = document.getElementById('sendBtn');
