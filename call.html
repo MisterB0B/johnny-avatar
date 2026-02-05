@@ -429,117 +429,103 @@ async function chat(message) {
   }
 }
 
-// ---- Speech Recognition (hands-free) ----
-let recognition = null;
+// ---- Always-On Mic via getUserMedia + Whisper ----
 let callActive = false;
-let pendingText = '';
-let silenceTimer = null;
+let mediaStream = null;
+let mediaRecorder = null;
+let audioChunks = [];
+let isTalking = false;
+let silenceStart = 0;
+const SILENCE_THRESHOLD = 0.015;
+const SILENCE_DURATION = 1800; // 1.8s silence = send
 
-if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  recognition = new SR();
-  recognition.continuous = true;
-  recognition.interimResults = true;
-  recognition.lang = 'en-US';
-
-  recognition.onresult = (e) => {
-    let finalText = '';
-    let interimText = '';
-    
-    for (let i = 0; i < e.results.length; i++) {
-      if (e.results[i].isFinal) {
-        finalText += e.results[i][0].transcript;
-      } else {
-        interimText += e.results[i][0].transcript;
-      }
-    }
-
-    const display = finalText || interimText;
-    if (display) {
-      transcript.innerHTML = `<span class="you">${display}</span>`;
-      callStatus.classList.add('hidden');
-    }
-
-    // When we get final results, wait for a pause then send
-    if (finalText.trim()) {
-      pendingText = finalText.trim();
-      clearTimeout(silenceTimer);
-      silenceTimer = setTimeout(() => {
-        if (pendingText) {
-          const toSend = pendingText;
-          pendingText = '';
-          // Interrupt if AI is speaking
-          if (isSpeaking && currentAudio) {
-            currentAudio.pause(); currentAudio = null;
-            isSpeaking = false; callScreen.classList.remove('speaking');
-          }
-          chat(toSend);
-        }
-      }, 1500); // 1.5s of silence = done talking
-    }
-  };
-
-  recognition.onend = () => {
-    isListening = false;
-    // IMMEDIATELY restart — never let mic die during a call
-    if (callActive) {
-      try { recognition.start(); isListening = true; } catch(e) {
-        setTimeout(() => { if (callActive) { try { recognition.start(); isListening = true; } catch(e2){} } }, 100);
-      }
-    }
-  };
-
-  recognition.onerror = (e) => {
-    isListening = false;
-    // Restart on any error if call is active
-    if (callActive) {
-      setTimeout(() => { 
-        if (callActive) { try { recognition.start(); isListening = true; } catch(e2){} }
-      }, 200);
-    }
-  };
-}
-
-function startListening() {
-  if (!recognition || isListening) return;
-  try {
-    isListening = true;
-    recognition.start();
-  } catch (e) {
-    isListening = false;
-    // Retry
-    setTimeout(() => { if (callActive) startListening(); }, 200);
-  }
-}
-
-function pauseListening() {
-  // Only used when ending call — never during active call
-  if (recognition && isListening) {
-    try { recognition.stop(); } catch(e) {}
-    isListening = false;
-  }
-}
-
-// Mic stays on during speech — never pause it
-// User can interrupt naturally by talking over the AI
-
-// ---- Start/Stop Call ----
-function startCall() {
+async function startCall() {
   callActive = true;
-  if (audioCtx) audioCtx.resume();
   btnMic.classList.add('active');
   listeningIndicator.classList.add('active');
-  callStatus.textContent = 'Connected';
+  callStatus.textContent = 'Connected — just talk';
   callStatus.classList.remove('hidden');
   setTimeout(() => callStatus.classList.add('hidden'), 2000);
-  startListening();
+
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  await audioCtx.resume();
+
+  // Grab mic — stays on the ENTIRE call
+  mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  
+  // Silence detection
+  const micSource = audioCtx.createMediaStreamSource(mediaStream);
+  const detector = audioCtx.createAnalyser();
+  detector.fftSize = 512;
+  micSource.connect(detector);
+  const buf = new Float32Array(detector.fftSize);
+
+  function monitor() {
+    if (!callActive) return;
+    detector.getFloatTimeDomainData(buf);
+    let sum = 0;
+    for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+    const rms = Math.sqrt(sum / buf.length);
+
+    if (rms > SILENCE_THRESHOLD) {
+      if (!isTalking) {
+        isTalking = true;
+        audioChunks = [];
+        // Interrupt AI if speaking
+        if (isSpeaking && currentAudio) {
+          currentAudio.pause(); currentAudio = null;
+          isSpeaking = false; callScreen.classList.remove('speaking');
+        }
+        // Start recording
+        mediaRecorder = new MediaRecorder(mediaStream, { mimeType: MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/mp4' });
+        mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunks.push(e.data); };
+        mediaRecorder.start(100);
+      }
+      silenceStart = Date.now();
+    } else if (isTalking && Date.now() - silenceStart > SILENCE_DURATION) {
+      isTalking = false;
+      if (mediaRecorder && mediaRecorder.state === 'recording') {
+        mediaRecorder.onstop = async () => {
+          if (audioChunks.length === 0) return;
+          const blob = new Blob(audioChunks, { type: mediaRecorder.mimeType });
+          audioChunks = [];
+          if (blob.size < 4000) return; // skip tiny
+          
+          transcript.innerHTML = '<span class="you">...</span>';
+          try {
+            const fd = new FormData();
+            fd.append('file', blob, 'audio.webm');
+            fd.append('model', 'whisper-1');
+            fd.append('language', 'en');
+            const resp = await fetch(`${API_BASE}/api/transcribe`, { method: 'POST', body: fd });
+            const data = await resp.json();
+            const text = data.text?.trim();
+            if (text && text.length > 1) {
+              transcript.innerHTML = `<span class="you">${text}</span>`;
+              chat(text);
+            } else {
+              transcript.innerHTML = '';
+            }
+          } catch(e) {
+            console.error('Transcribe error:', e);
+            transcript.innerHTML = '';
+          }
+        };
+        mediaRecorder.stop();
+      }
+    }
+    requestAnimationFrame(monitor);
+  }
+  monitor();
 }
 
 function endCall() {
   callActive = false;
-  pauseListening();
+  isTalking = false;
   btnMic.classList.remove('active');
   listeningIndicator.classList.remove('active');
+  if (mediaRecorder && mediaRecorder.state === 'recording') try { mediaRecorder.stop(); } catch(e) {}
+  if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
   if (currentAudio) { currentAudio.pause(); currentAudio = null; }
   isSpeaking = false;
   callScreen.classList.remove('speaking');
@@ -547,12 +533,9 @@ function endCall() {
 
 btnMic.addEventListener('click', () => {
   if (callActive) {
-    // Tap to interrupt / toggle mute
-    if (isSpeaking) {
-      if (currentAudio) { currentAudio.pause(); currentAudio = null; }
-      isSpeaking = false;
-      callScreen.classList.remove('speaking');
-      startListening();
+    if (isSpeaking && currentAudio) {
+      currentAudio.pause(); currentAudio = null;
+      isSpeaking = false; callScreen.classList.remove('speaking');
     }
   } else {
     startCall();
@@ -561,16 +544,14 @@ btnMic.addEventListener('click', () => {
 
 btnEnd.addEventListener('click', () => {
   endCall();
-  // Could navigate away or just reset
   callStartTime = Date.now();
   conversationHistory = [];
   transcript.innerHTML = '';
-  callStatus.textContent = 'Call ended — tap 🎤 to start again';
+  callStatus.textContent = 'Call ended — tap 🎤 to call again';
   callStatus.classList.remove('hidden');
 });
 
-// Auto-start prompt
-callStatus.textContent = 'Tap 🎤 once to start — then just talk';
+callStatus.textContent = 'Tap 🎤 to start the call';
 </script>
 </body>
 </html>
