@@ -481,45 +481,42 @@ if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
 
   recognition.onend = () => {
     isListening = false;
-    listeningIndicator.classList.remove('active');
-    // Auto-restart if call is still active and not speaking
-    if (callActive && !isSpeaking) {
-      setTimeout(() => {
-        if (callActive && !isSpeaking) startListening();
-      }, 500);
+    // IMMEDIATELY restart — never let mic die during a call
+    if (callActive) {
+      try { recognition.start(); isListening = true; } catch(e) {
+        setTimeout(() => { if (callActive) { try { recognition.start(); isListening = true; } catch(e2){} } }, 100);
+      }
     }
   };
 
   recognition.onerror = (e) => {
     isListening = false;
-    listeningIndicator.classList.remove('active');
-    // Auto-restart on recoverable errors
-    if (callActive && (e.error === 'no-speech' || e.error === 'aborted')) {
-      setTimeout(() => {
-        if (callActive && !isSpeaking) startListening();
-      }, 1000);
+    // Restart on any error if call is active
+    if (callActive) {
+      setTimeout(() => { 
+        if (callActive) { try { recognition.start(); isListening = true; } catch(e2){} }
+      }, 200);
     }
   };
 }
 
 function startListening() {
-  if (!recognition || isListening || isSpeaking) return;
+  if (!recognition || isListening) return;
   try {
     isListening = true;
-    listeningIndicator.classList.add('active');
-    btnMic.classList.add('active');
     recognition.start();
   } catch (e) {
-    // Already started
     isListening = false;
+    // Retry
+    setTimeout(() => { if (callActive) startListening(); }, 200);
   }
 }
 
 function pauseListening() {
+  // Only used when ending call — never during active call
   if (recognition && isListening) {
     try { recognition.stop(); } catch(e) {}
     isListening = false;
-    listeningIndicator.classList.remove('active');
   }
 }
 
@@ -531,7 +528,8 @@ function startCall() {
   callActive = true;
   if (audioCtx) audioCtx.resume();
   btnMic.classList.add('active');
-  callStatus.textContent = 'Listening...';
+  listeningIndicator.classList.add('active');
+  callStatus.textContent = 'Connected';
   callStatus.classList.remove('hidden');
   setTimeout(() => callStatus.classList.add('hidden'), 2000);
   startListening();
@@ -541,6 +539,7 @@ function endCall() {
   callActive = false;
   pauseListening();
   btnMic.classList.remove('active');
+  listeningIndicator.classList.remove('active');
   if (currentAudio) { currentAudio.pause(); currentAudio = null; }
   isSpeaking = false;
   callScreen.classList.remove('speaking');
