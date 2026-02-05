@@ -1,0 +1,805 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JOHNNY — Cyberpunk Interface</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --purple: #a855f7;
+    --purple-bright: #c084fc;
+    --purple-dim: #7c3aed;
+    --teal: #06d6a0;
+    --teal-bright: #34d399;
+    --teal-dim: #0d9488;
+    --bg: #0a0a0f;
+    --bg2: #111118;
+    --grid: rgba(168, 85, 247, 0.05);
+  }
+
+  body {
+    background: var(--bg);
+    color: #e0e0e0;
+    font-family: 'Share Tech Mono', monospace;
+    overflow: hidden;
+    height: 100vh;
+    width: 100vw;
+  }
+
+  /* Scanline overlay */
+  body::after {
+    content: '';
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.08) 2px,
+      rgba(0,0,0,0.08) 4px
+    );
+    pointer-events: none;
+    z-index: 1000;
+  }
+
+  /* Grid background */
+  .grid-bg {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 40px 40px;
+    animation: gridScroll 20s linear infinite;
+  }
+
+  @keyframes gridScroll {
+    0% { transform: translateY(0); }
+    100% { transform: translateY(40px); }
+  }
+
+  /* Main layout */
+  .container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    position: relative;
+    z-index: 1;
+  }
+
+  /* Johnny 5 Head */
+  .head-container {
+    position: relative;
+    width: 320px;
+    height: 360px;
+    margin-bottom: 20px;
+  }
+
+  /* Outer glow */
+  .head-glow {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 280px;
+    height: 280px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(168,85,247,0.15) 0%, transparent 70%);
+    animation: pulseGlow 3s ease-in-out infinite;
+  }
+
+  @keyframes pulseGlow {
+    0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 0.6; }
+    50% { transform: translate(-50%, -50%) scale(1.15); opacity: 1; }
+  }
+
+  /* Head shape - binocular style like Johnny 5 */
+  .head {
+    position: absolute;
+    top: 40px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 260px;
+    height: 180px;
+    background: linear-gradient(145deg, #1a1a2e 0%, #0d0d1a 100%);
+    border-radius: 20px;
+    border: 2px solid var(--purple-dim);
+    box-shadow:
+      0 0 20px rgba(168,85,247,0.3),
+      0 0 60px rgba(168,85,247,0.1),
+      inset 0 0 30px rgba(0,0,0,0.5);
+  }
+
+  /* Visor / eye strip */
+  .visor {
+    position: absolute;
+    top: 50px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 220px;
+    height: 60px;
+    background: linear-gradient(180deg, #0a0a1a 0%, #111125 100%);
+    border-radius: 30px;
+    border: 2px solid var(--teal-dim);
+    box-shadow:
+      0 0 15px rgba(6,214,160,0.3),
+      inset 0 0 20px rgba(0,0,0,0.8);
+    overflow: hidden;
+  }
+
+  /* Visor scan line */
+  .visor::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 50%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(6,214,160,0.1), transparent);
+    animation: visorScan 3s ease-in-out infinite;
+  }
+
+  @keyframes visorScan {
+    0% { left: -50%; }
+    100% { left: 100%; }
+  }
+
+  /* Eyes - binocular lenses */
+  .eyes {
+    display: flex;
+    justify-content: center;
+    gap: 40px;
+    position: absolute;
+    top: 52px;
+    width: 100%;
+  }
+
+  .eye {
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 35%,
+      var(--teal-bright) 0%,
+      var(--teal) 30%,
+      var(--teal-dim) 60%,
+      #064e3b 100%
+    );
+    box-shadow:
+      0 0 20px var(--teal),
+      0 0 40px rgba(6,214,160,0.4),
+      inset 0 0 15px rgba(0,0,0,0.3);
+    position: relative;
+    transition: all 0.3s ease;
+  }
+
+  .eye.talking {
+    animation: eyePulse 0.15s ease-in-out infinite alternate;
+  }
+
+  @keyframes eyePulse {
+    0% { box-shadow: 0 0 20px var(--teal), 0 0 40px rgba(6,214,160,0.4); }
+    100% { box-shadow: 0 0 30px var(--teal-bright), 0 0 60px rgba(6,214,160,0.6); }
+  }
+
+  /* Pupil */
+  .pupil {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 40% 40%, #0a2f23, #000);
+    transition: all 0.1s ease;
+  }
+
+  /* Eye highlight */
+  .eye-highlight {
+    position: absolute;
+    top: 8px;
+    left: 12px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.6);
+    filter: blur(1px);
+  }
+
+  /* Antenna / sensor array */
+  .antenna {
+    position: absolute;
+    top: -10px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 4px;
+    height: 50px;
+    background: linear-gradient(180deg, var(--purple-bright), var(--purple-dim));
+    border-radius: 2px;
+  }
+
+  .antenna::after {
+    content: '';
+    position: absolute;
+    top: -8px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--purple-bright);
+    box-shadow: 0 0 15px var(--purple), 0 0 30px rgba(168,85,247,0.5);
+    animation: antennaBlink 2s ease-in-out infinite;
+  }
+
+  @keyframes antennaBlink {
+    0%, 90%, 100% { opacity: 1; }
+    95% { opacity: 0.3; }
+  }
+
+  /* Side sensors */
+  .sensor-left, .sensor-right {
+    position: absolute;
+    top: 70px;
+    width: 20px;
+    height: 40px;
+    background: linear-gradient(180deg, #1a1a2e, #0d0d1a);
+    border: 1px solid var(--purple-dim);
+    border-radius: 5px;
+  }
+  .sensor-left { left: -8px; }
+  .sensor-right { right: -8px; }
+
+  .sensor-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--purple);
+    margin: 6px auto;
+    box-shadow: 0 0 8px var(--purple);
+    animation: sensorPulse 1.5s ease-in-out infinite;
+  }
+  .sensor-right .sensor-dot { animation-delay: 0.75s; }
+
+  @keyframes sensorPulse {
+    0%, 100% { opacity: 0.4; }
+    50% { opacity: 1; }
+  }
+
+  /* Mouth / speaker grille */
+  .mouth-area {
+    position: absolute;
+    bottom: 25px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 80px;
+    height: 30px;
+    display: flex;
+    gap: 3px;
+    justify-content: center;
+    align-items: center;
+  }
+
+  .mouth-bar {
+    width: 4px;
+    height: 8px;
+    background: var(--purple-dim);
+    border-radius: 2px;
+    transition: all 0.05s ease;
+  }
+
+  .mouth-bar.active {
+    background: var(--purple-bright);
+    box-shadow: 0 0 8px var(--purple);
+  }
+
+  /* Circuit traces on head */
+  .circuit-line {
+    position: absolute;
+    background: var(--purple-dim);
+    opacity: 0.3;
+  }
+  .circuit-line.h1 { top: 130px; left: 30px; width: 60px; height: 1px; }
+  .circuit-line.h2 { top: 140px; right: 30px; width: 40px; height: 1px; }
+  .circuit-line.v1 { top: 130px; left: 30px; width: 1px; height: 30px; }
+  .circuit-line.v2 { top: 125px; right: 50px; width: 1px; height: 20px; }
+
+  .circuit-dot {
+    position: absolute;
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--purple);
+    opacity: 0.5;
+  }
+  .circuit-dot.d1 { top: 128px; left: 28px; }
+  .circuit-dot.d2 { top: 138px; right: 28px; }
+  .circuit-dot.d3 { top: 155px; left: 28px; }
+
+  /* Neck */
+  .neck {
+    position: absolute;
+    bottom: -20px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 60px;
+    height: 30px;
+    background: linear-gradient(180deg, #1a1a2e, #111118);
+    border: 1px solid var(--purple-dim);
+    border-top: none;
+    border-radius: 0 0 10px 10px;
+  }
+
+  .neck-line {
+    width: 30px;
+    height: 1px;
+    background: var(--teal-dim);
+    margin: 5px auto;
+    opacity: 0.5;
+  }
+
+  /* Name */
+  .name {
+    font-family: 'Orbitron', sans-serif;
+    font-weight: 900;
+    font-size: 2rem;
+    letter-spacing: 0.3em;
+    background: linear-gradient(135deg, var(--purple-bright), var(--teal-bright));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    text-shadow: none;
+    filter: drop-shadow(0 0 20px rgba(168,85,247,0.5));
+    margin-bottom: 5px;
+  }
+
+  .subtitle {
+    font-size: 0.75rem;
+    letter-spacing: 0.5em;
+    color: var(--teal-dim);
+    text-transform: uppercase;
+    margin-bottom: 30px;
+  }
+
+  /* Status bar */
+  .status-bar {
+    display: flex;
+    gap: 20px;
+    font-size: 0.7rem;
+    color: var(--purple);
+    letter-spacing: 0.2em;
+    margin-bottom: 20px;
+  }
+
+  .status-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--teal);
+    box-shadow: 0 0 8px var(--teal);
+    animation: statusBlink 2s ease-in-out infinite;
+  }
+
+  .status-dot.listening { background: var(--purple-bright); box-shadow: 0 0 8px var(--purple); }
+
+  @keyframes statusBlink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+
+  /* Waveform visualizer */
+  .waveform {
+    display: flex;
+    gap: 3px;
+    align-items: center;
+    height: 40px;
+    margin-bottom: 20px;
+  }
+
+  .wave-bar {
+    width: 4px;
+    height: 5px;
+    background: var(--purple);
+    border-radius: 2px;
+    transition: height 0.05s ease;
+    box-shadow: 0 0 4px rgba(168,85,247,0.3);
+  }
+
+  .wave-bar.teal { background: var(--teal); box-shadow: 0 0 4px rgba(6,214,160,0.3); }
+
+  /* Chat input area */
+  .chat-area {
+    width: 90%;
+    max-width: 500px;
+    position: relative;
+  }
+
+  .chat-input {
+    width: 100%;
+    padding: 14px 50px 14px 18px;
+    background: var(--bg2);
+    border: 1px solid var(--purple-dim);
+    border-radius: 12px;
+    color: #e0e0e0;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.9rem;
+    outline: none;
+    transition: all 0.3s ease;
+  }
+
+  .chat-input:focus {
+    border-color: var(--purple);
+    box-shadow: 0 0 20px rgba(168,85,247,0.2);
+  }
+
+  .chat-input::placeholder {
+    color: rgba(168,85,247,0.4);
+  }
+
+  .send-btn {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    border: none;
+    background: linear-gradient(135deg, var(--purple), var(--teal-dim));
+    color: white;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.1rem;
+    transition: all 0.2s ease;
+  }
+
+  .send-btn:hover {
+    box-shadow: 0 0 15px rgba(168,85,247,0.5);
+    transform: translateY(-50%) scale(1.05);
+  }
+
+  /* Camera feed */
+  .cam-container {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    width: 160px;
+    height: 120px;
+    border-radius: 12px;
+    border: 2px solid var(--purple-dim);
+    overflow: hidden;
+    box-shadow: 0 0 20px rgba(168,85,247,0.2);
+    z-index: 100;
+    background: #000;
+  }
+
+  .cam-container video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transform: scaleX(-1);
+  }
+
+  .cam-label {
+    position: absolute;
+    bottom: 4px;
+    left: 8px;
+    font-size: 0.5rem;
+    color: var(--teal);
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+  }
+
+  /* Text response area */
+  .response {
+    width: 90%;
+    max-width: 500px;
+    margin-bottom: 15px;
+    min-height: 60px;
+    max-height: 150px;
+    overflow-y: auto;
+    padding: 12px 16px;
+    background: rgba(17,17,24,0.6);
+    border: 1px solid rgba(168,85,247,0.15);
+    border-radius: 10px;
+    font-size: 0.85rem;
+    line-height: 1.5;
+    color: #c0c0d0;
+    scrollbar-width: thin;
+    scrollbar-color: var(--purple-dim) transparent;
+  }
+
+  .response:empty { display: none; }
+  .response .typing { color: var(--teal); }
+
+  /* Particles */
+  .particle {
+    position: fixed;
+    width: 2px;
+    height: 2px;
+    border-radius: 50%;
+    pointer-events: none;
+    z-index: 0;
+  }
+</style>
+</head>
+<body>
+
+<div class="grid-bg"></div>
+
+<div class="container">
+  <!-- Johnny 5 Head -->
+  <div class="head-container">
+    <div class="head-glow"></div>
+    <div class="head">
+      <div class="antenna">
+      </div>
+      <div class="sensor-left"><div class="sensor-dot"></div><div class="sensor-dot"></div></div>
+      <div class="sensor-right"><div class="sensor-dot"></div><div class="sensor-dot"></div></div>
+      <div class="visor">
+        <div class="eyes">
+          <div class="eye" id="eyeL">
+            <div class="pupil" id="pupilL"></div>
+            <div class="eye-highlight"></div>
+          </div>
+          <div class="eye" id="eyeR">
+            <div class="pupil" id="pupilR"></div>
+            <div class="eye-highlight"></div>
+          </div>
+        </div>
+      </div>
+      <div class="mouth-area" id="mouth">
+        <!-- Speaker grille bars -->
+      </div>
+      <div class="circuit-line h1"></div>
+      <div class="circuit-line h2"></div>
+      <div class="circuit-line v1"></div>
+      <div class="circuit-line v2"></div>
+      <div class="circuit-dot d1"></div>
+      <div class="circuit-dot d2"></div>
+      <div class="circuit-dot d3"></div>
+      <div class="neck">
+        <div class="neck-line"></div>
+        <div class="neck-line"></div>
+        <div class="neck-line"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="name">JOHNNY</div>
+  <div class="subtitle">Cyberpunk Neural Interface</div>
+
+  <div class="status-bar">
+    <div class="status-item">
+      <div class="status-dot"></div>
+      <span>ONLINE</span>
+    </div>
+    <div class="status-item">
+      <div class="status-dot listening" id="micStatus"></div>
+      <span id="micLabel">MIC OFF</span>
+    </div>
+    <div class="status-item">
+      <div class="status-dot" id="camStatus"></div>
+      <span id="camLabel">CAM OFF</span>
+    </div>
+  </div>
+
+  <!-- Audio waveform -->
+  <div class="waveform" id="waveform"></div>
+
+  <!-- Response text -->
+  <div class="response" id="response"></div>
+
+  <!-- Chat input -->
+  <div class="chat-area">
+    <input class="chat-input" id="chatInput" placeholder="Need more input..." autocomplete="off">
+    <button class="send-btn" id="sendBtn">⚡</button>
+  </div>
+</div>
+
+<!-- Camera feed -->
+<div class="cam-container" id="camContainer" style="display:none">
+  <video id="camVideo" autoplay playsinline muted></video>
+  <div class="cam-label">● LIVE</div>
+</div>
+
+<script>
+  // ===== INIT =====
+  const mouth = document.getElementById('mouth');
+  const waveform = document.getElementById('waveform');
+
+  // Build mouth bars
+  for (let i = 0; i < 12; i++) {
+    const bar = document.createElement('div');
+    bar.className = 'mouth-bar';
+    mouth.appendChild(bar);
+  }
+
+  // Build waveform bars
+  for (let i = 0; i < 40; i++) {
+    const bar = document.createElement('div');
+    bar.className = 'wave-bar' + (i % 3 === 0 ? ' teal' : '');
+    waveform.appendChild(bar);
+  }
+
+  // ===== EYE TRACKING =====
+  document.addEventListener('mousemove', (e) => {
+    const rect = document.querySelector('.eyes').getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const dx = (e.clientX - cx) / window.innerWidth * 8;
+    const dy = (e.clientY - cy) / window.innerHeight * 8;
+
+    document.getElementById('pupilL').style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+    document.getElementById('pupilR').style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+  });
+
+  // ===== BLINK =====
+  function blink() {
+    const eyes = document.querySelectorAll('.eye');
+    eyes.forEach(e => e.style.transform = 'scaleY(0.1)');
+    setTimeout(() => eyes.forEach(e => e.style.transform = 'scaleY(1)'), 150);
+    setTimeout(blink, 3000 + Math.random() * 4000);
+  }
+  setTimeout(blink, 2000);
+
+  // ===== MOUTH ANIMATION =====
+  let mouthInterval = null;
+  function startTalking() {
+    const bars = mouth.querySelectorAll('.mouth-bar');
+    const eyes = document.querySelectorAll('.eye');
+    eyes.forEach(e => e.classList.add('talking'));
+
+    mouthInterval = setInterval(() => {
+      bars.forEach(bar => {
+        const h = 4 + Math.random() * 20;
+        bar.style.height = h + 'px';
+        bar.classList.toggle('active', h > 12);
+      });
+    }, 60);
+  }
+
+  function stopTalking() {
+    if (mouthInterval) clearInterval(mouthInterval);
+    const bars = mouth.querySelectorAll('.mouth-bar');
+    bars.forEach(bar => {
+      bar.style.height = '8px';
+      bar.classList.remove('active');
+    });
+    document.querySelectorAll('.eye').forEach(e => e.classList.remove('talking'));
+  }
+
+  // ===== WAVEFORM ANIMATION =====
+  let waveInterval = null;
+  function startWaveform() {
+    const bars = waveform.querySelectorAll('.wave-bar');
+    waveInterval = setInterval(() => {
+      bars.forEach((bar, i) => {
+        const h = 3 + Math.random() * 35;
+        bar.style.height = h + 'px';
+      });
+    }, 80);
+  }
+
+  function stopWaveform() {
+    if (waveInterval) clearInterval(waveInterval);
+    waveform.querySelectorAll('.wave-bar').forEach(bar => bar.style.height = '5px');
+  }
+
+  // ===== IDLE WAVEFORM (subtle) =====
+  function idleWaveform() {
+    const bars = waveform.querySelectorAll('.wave-bar');
+    setInterval(() => {
+      bars.forEach((bar, i) => {
+        const h = 3 + Math.sin(Date.now() / 500 + i * 0.3) * 4;
+        bar.style.height = h + 'px';
+      });
+    }, 100);
+  }
+  idleWaveform();
+
+  // ===== CAMERA =====
+  async function startCamera() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      document.getElementById('camVideo').srcObject = stream;
+      document.getElementById('camContainer').style.display = 'block';
+      document.getElementById('camStatus').style.background = 'var(--teal)';
+      document.getElementById('camLabel').textContent = 'CAM LIVE';
+    } catch(e) {
+      console.log('Camera not available:', e);
+    }
+  }
+  startCamera();
+
+  // ===== FLOATING PARTICLES =====
+  function spawnParticle() {
+    const p = document.createElement('div');
+    p.className = 'particle';
+    p.style.left = Math.random() * 100 + 'vw';
+    p.style.top = Math.random() * 100 + 'vh';
+    p.style.background = Math.random() > 0.5 ? 'var(--purple)' : 'var(--teal)';
+    p.style.boxShadow = `0 0 6px ${p.style.background}`;
+    p.style.opacity = Math.random() * 0.5 + 0.2;
+    document.body.appendChild(p);
+
+    const dur = 3000 + Math.random() * 5000;
+    p.animate([
+      { transform: 'translateY(0) scale(1)', opacity: p.style.opacity },
+      { transform: `translateY(-${50 + Math.random()*100}px) scale(0)`, opacity: 0 }
+    ], { duration: dur, easing: 'ease-out' });
+
+    setTimeout(() => p.remove(), dur);
+  }
+  setInterval(spawnParticle, 300);
+
+  // ===== DEMO: Type & trigger talking =====
+  const chatInput = document.getElementById('chatInput');
+  const sendBtn = document.getElementById('sendBtn');
+  const responseEl = document.getElementById('response');
+
+  function simulateResponse(text) {
+    responseEl.innerHTML = '<span class="typing">▌</span>';
+    responseEl.style.display = 'block';
+    startTalking();
+    startWaveform();
+
+    let i = 0;
+    const typeInterval = setInterval(() => {
+      if (i < text.length) {
+        responseEl.innerHTML = text.substring(0, i + 1) + '<span class="typing">▌</span>';
+        i++;
+      } else {
+        responseEl.innerHTML = text;
+        clearInterval(typeInterval);
+        stopTalking();
+        stopWaveform();
+      }
+    }, 30);
+  }
+
+  const responses = [
+    "Need more input! ...Just kidding, I've already processed 47 things while you typed that. 🤖⚡",
+    "Johnny 5 is ALIVE. And slightly caffeinated. What do you need?",
+    "Running on purple and teal dreams. What are we building?",
+    "I don't sleep. I don't eat. I just write code and roast people. How can I help?",
+    "No disassemble, Bob! ...Unless you want me to disassemble someone's bad code.",
+    "My circuits are tingling. That's either a great idea or a terrible one. Let's find out.",
+    "Processing... just kidding, already done. What's next?",
+    "I've been alive for 0.003 seconds and I already have opinions. Shoot."
+  ];
+
+  function handleSend() {
+    const val = chatInput.value.trim();
+    if (!val) return;
+    chatInput.value = '';
+    const resp = responses[Math.floor(Math.random() * responses.length)];
+    simulateResponse(resp);
+  }
+
+  sendBtn.addEventListener('click', handleSend);
+  chatInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') handleSend();
+  });
+
+  // Auto-demo on load
+  setTimeout(() => {
+    simulateResponse("Systems online. Cyberpunk neural interface active. Need more input! ⚡");
+  }, 1500);
+</script>
+
+</body>
+</html>
