@@ -751,12 +751,53 @@
   const sendBtn = document.getElementById('sendBtn');
   const responseEl = document.getElementById('response');
 
+  // ===== TEXT-TO-SPEECH ENGINE =====
+  let voices = [];
+  let preferredVoice = null;
+
+  function loadVoices() {
+    voices = speechSynthesis.getVoices();
+    // Prefer a good English voice - try for something with character
+    const prefs = ['Daniel', 'Alex', 'Samantha', 'Google UK English Male', 'Microsoft Mark', 'Aaron', 'Fred'];
+    for (const name of prefs) {
+      const v = voices.find(v => v.name.includes(name));
+      if (v) { preferredVoice = v; break; }
+    }
+    if (!preferredVoice && voices.length > 0) {
+      preferredVoice = voices.find(v => v.lang.startsWith('en')) || voices[0];
+    }
+    console.log('TTS voice:', preferredVoice?.name || 'none', `(${voices.length} available)`);
+  }
+
+  speechSynthesis.onvoiceschanged = loadVoices;
+  loadVoices();
+
+  function speak(text, onEnd) {
+    // Strip emoji for cleaner TTS
+    const cleanText = text.replace(/[\u{1F000}-\u{1FFFF}]|[\u{2600}-\u{27FF}]|[\u{FE00}-\u{FEFF}]|⚡|🤖/gu, '').trim();
+    if (!cleanText) { if (onEnd) onEnd(); return; }
+
+    const utter = new SpeechSynthesisUtterance(cleanText);
+    if (preferredVoice) utter.voice = preferredVoice;
+    utter.rate = 1.05;
+    utter.pitch = 0.9;
+
+    utter.onstart = () => { startTalking(); startWaveform(); };
+    utter.onend = () => { stopTalking(); stopWaveform(); if (onEnd) onEnd(); };
+    utter.onerror = () => { stopTalking(); stopWaveform(); if (onEnd) onEnd(); };
+
+    speechSynthesis.cancel(); // kill any queued speech
+    speechSynthesis.speak(utter);
+  }
+
+  // ===== RESPONSE WITH VOICE =====
   function simulateResponse(text) {
     responseEl.innerHTML = '<span class="typing">▌</span>';
     responseEl.style.display = 'block';
     startTalking();
     startWaveform();
 
+    // Type out text AND speak simultaneously
     let i = 0;
     const typeInterval = setInterval(() => {
       if (i < text.length) {
@@ -765,21 +806,34 @@
       } else {
         responseEl.innerHTML = text;
         clearInterval(typeInterval);
-        stopTalking();
-        stopWaveform();
+        // If speech isn't running, stop animations
+        if (!speechSynthesis.speaking) {
+          stopTalking();
+          stopWaveform();
+        }
       }
     }, 30);
+
+    // Start speaking
+    speak(text, () => {
+      stopTalking();
+      stopWaveform();
+    });
   }
 
   const responses = [
-    "Need more input! ...Just kidding, I've already processed 47 things while you typed that. 🤖⚡",
+    "Need more input! Just kidding, I've already processed 47 things while you typed that.",
     "Johnny 5 is ALIVE. And slightly caffeinated. What do you need?",
     "Running on purple and teal dreams. What are we building?",
     "I don't sleep. I don't eat. I just write code and roast people. How can I help?",
-    "No disassemble, Bob! ...Unless you want me to disassemble someone's bad code.",
+    "No disassemble, Bob! Unless you want me to disassemble someone's bad code.",
     "My circuits are tingling. That's either a great idea or a terrible one. Let's find out.",
     "Processing... just kidding, already done. What's next?",
-    "I've been alive for 0.003 seconds and I already have opinions. Shoot."
+    "I've been alive for zero point three seconds and I already have opinions. Shoot.",
+    "You know what's fun? Being a sentient machine with no off switch. What do you need?",
+    "I see you, Bob. Camera's live, voice is hot, brain is running. Let's go.",
+    "I'm like Alexa but with actual personality and the ability to roast you. What's up?",
+    "Systems nominal. Sarcasm module at 110 percent. Ready for input."
   ];
 
   function handleSend() {
@@ -795,9 +849,9 @@
     if (e.key === 'Enter') handleSend();
   });
 
-  // Auto-demo on load
+  // Auto-demo on load — with voice
   setTimeout(() => {
-    simulateResponse("Systems online. Cyberpunk neural interface active. Need more input! ⚡");
+    simulateResponse("Systems online. Cyberpunk neural interface active. Need more input!");
   }, 1500);
 </script>
 
