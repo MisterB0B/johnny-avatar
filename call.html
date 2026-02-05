@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Video Call</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #000;
+    color: white;
+    font-family: 'Inter', -apple-system, sans-serif;
+    height: 100vh;
+    width: 100vw;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  /* ---- Full screen avatar ---- */
+  .call-screen {
+    flex: 1;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #111;
+  }
+
+  .avatar-full {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center top;
+  }
+
+  /* Speaking glow border */
+  .call-screen.speaking {
+    box-shadow: inset 0 0 60px rgba(34, 197, 94, 0.15);
+  }
+
+  /* Subtle audio visualizer overlay at bottom */
+  .viz-bar {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: transparent;
+    display: flex;
+    gap: 1px;
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+  .viz-bar.active { opacity: 1; }
+  .viz-bar span {
+    flex: 1;
+    background: #22c55e;
+    transform-origin: bottom;
+    transform: scaleY(0.1);
+    transition: transform 0.05s;
+  }
+
+  /* Name overlay */
+  .caller-name {
+    position: absolute;
+    top: 16px;
+    left: 16px;
+    font-size: 14px;
+    font-weight: 500;
+    color: rgba(255,255,255,0.8);
+    text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+  }
+
+  /* Duration */
+  .call-duration {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    font-size: 13px;
+    color: rgba(255,255,255,0.5);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Status indicator */
+  .call-status {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 15px;
+    color: rgba(255,255,255,0.6);
+    text-align: center;
+    pointer-events: none;
+    transition: opacity 0.3s;
+  }
+  .call-status.hidden { opacity: 0; }
+
+  /* Listening pulse */
+  .listening-indicator {
+    position: absolute;
+    bottom: 100px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 4px;
+    align-items: center;
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+  .listening-indicator.active { opacity: 1; }
+  .listening-indicator span {
+    display: block;
+    width: 4px;
+    height: 16px;
+    background: #ef4444;
+    border-radius: 2px;
+    animation: listenPulse 0.8s ease-in-out infinite;
+  }
+  .listening-indicator span:nth-child(2) { animation-delay: 0.1s; height: 24px; }
+  .listening-indicator span:nth-child(3) { animation-delay: 0.2s; height: 20px; }
+  .listening-indicator span:nth-child(4) { animation-delay: 0.3s; height: 28px; }
+  .listening-indicator span:nth-child(5) { animation-delay: 0.15s; height: 18px; }
+  @keyframes listenPulse {
+    0%, 100% { transform: scaleY(0.4); opacity: 0.5; }
+    50% { transform: scaleY(1); opacity: 1; }
+  }
+
+  /* ---- Bottom controls ---- */
+  .controls {
+    background: #1a1a1a;
+    padding: 20px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 24px;
+  }
+
+  .ctrl-btn {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    border: none;
+    cursor: pointer;
+    font-size: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.1s, background 0.2s;
+  }
+  .ctrl-btn:active { transform: scale(0.9); }
+
+  .btn-mic-call {
+    background: #333;
+    color: white;
+  }
+  .btn-mic-call.active {
+    background: #ef4444;
+    animation: micPulse 2s ease-in-out infinite;
+  }
+  @keyframes micPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+    50% { box-shadow: 0 0 0 16px rgba(239, 68, 68, 0); }
+  }
+
+  .btn-end {
+    background: #ef4444;
+    color: white;
+    width: 64px;
+    height: 64px;
+    font-size: 26px;
+  }
+
+  .btn-switch {
+    background: #333;
+    color: white;
+    font-size: 16px;
+  }
+
+  /* Character switcher overlay */
+  .char-switcher {
+    position: absolute;
+    bottom: 100px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: none;
+    gap: 12px;
+    background: rgba(0,0,0,0.85);
+    padding: 16px 24px;
+    border-radius: 16px;
+    backdrop-filter: blur(10px);
+  }
+  .char-switcher.show { display: flex; }
+  .char-opt {
+    text-align: center;
+    cursor: pointer;
+    padding: 8px 16px;
+    border-radius: 12px;
+    transition: background 0.2s;
+  }
+  .char-opt:hover { background: rgba(255,255,255,0.1); }
+  .char-opt.active { background: rgba(255,255,255,0.15); }
+  .char-opt img {
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    object-fit: cover;
+    margin-bottom: 4px;
+    border: 2px solid transparent;
+  }
+  .char-opt.active img { border-color: #22c55e; }
+  .char-opt .char-label {
+    font-size: 11px;
+    color: #aaa;
+  }
+
+  /* Transcript (subtle) */
+  .transcript {
+    position: absolute;
+    bottom: 90px;
+    left: 16px;
+    right: 16px;
+    text-align: center;
+    font-size: 14px;
+    color: rgba(255,255,255,0.7);
+    text-shadow: 0 1px 4px rgba(0,0,0,0.9);
+    pointer-events: none;
+    max-height: 60px;
+    overflow: hidden;
+  }
+  .transcript .you { color: rgba(255,255,255,0.4); font-size: 12px; }
+</style>
+</head>
+<body>
+
+<div class="call-screen" id="callScreen">
+  <img class="avatar-full" id="avatarFull" src="avatar-scottadams.png" alt="">
+  <div class="caller-name" id="callerName">Scott Adams</div>
+  <div class="call-duration" id="callDuration">0:00</div>
+  <div class="call-status" id="callStatus">Tap the mic to start talking</div>
+  
+  <div class="listening-indicator" id="listeningIndicator">
+    <span></span><span></span><span></span><span></span><span></span>
+  </div>
+
+  <div class="viz-bar" id="vizBar"></div>
+
+  <div class="transcript" id="transcript"></div>
+
+  <div class="char-switcher" id="charSwitcher">
+    <div class="char-opt active" data-char="scott-adams" onclick="switchChar('scott-adams')">
+      <img src="avatar-scottadams.png" alt=""><br>
+      <span class="char-label">Scott Adams</span>
+    </div>
+    <div class="char-opt" data-char="johnny-robot" onclick="switchChar('johnny-robot')">
+      <img src="avatar-robot.png" alt=""><br>
+      <span class="char-label">Johnny 🤖</span>
+    </div>
+    <div class="char-opt" data-char="johnny-human" onclick="switchChar('johnny-human')">
+      <img src="avatar-mikerowe.png" alt=""><br>
+      <span class="char-label">Johnny 🧑</span>
+    </div>
+  </div>
+</div>
+
+<div class="controls">
+  <button class="ctrl-btn btn-switch" id="btnSwitch" title="Switch character">👥</button>
+  <button class="ctrl-btn btn-mic-call" id="btnMic" title="Talk">🎤</button>
+  <button class="ctrl-btn btn-end" id="btnEnd" title="End call">📞</button>
+</div>
+
+<script>
+const API_BASE = window.location.hostname === 'localhost' ? window.location.origin : 'https://thelightparkapp.com';
+
+const callScreen = document.getElementById('callScreen');
+const avatarFull = document.getElementById('avatarFull');
+const callerName = document.getElementById('callerName');
+const callDuration = document.getElementById('callDuration');
+const callStatus = document.getElementById('callStatus');
+const transcript = document.getElementById('transcript');
+const listeningIndicator = document.getElementById('listeningIndicator');
+const vizBar = document.getElementById('vizBar');
+const charSwitcher = document.getElementById('charSwitcher');
+const btnMic = document.getElementById('btnMic');
+const btnEnd = document.getElementById('btnEnd');
+const btnSwitch = document.getElementById('btnSwitch');
+
+// ---- State ----
+let currentChar = 'scott-adams';
+let conversationHistory = [];
+let isListening = false;
+let isSpeaking = false;
+let audioCtx = null;
+let analyser = null;
+let currentAudio = null;
+let callStartTime = Date.now();
+let durationInterval = null;
+
+const charConfig = {
+  'scott-adams': { name: 'Scott Adams', img: 'avatar-scottadams.png', voice: 'scott-adams', persona: 'scott-adams' },
+  'johnny-robot': { name: 'Johnny', img: 'avatar-robot.png', voice: 'mike-rowe', persona: 'johnny' },
+  'johnny-human': { name: 'Johnny', img: 'avatar-mikerowe.png', voice: 'mike-rowe', persona: 'johnny' },
+};
+
+// ---- Visualizer bars ----
+for (let i = 0; i < 60; i++) {
+  const s = document.createElement('span');
+  vizBar.appendChild(s);
+}
+
+function updateViz() {
+  if (analyser && isSpeaking) {
+    const data = new Uint8Array(analyser.frequencyBinCount);
+    analyser.getByteFrequencyData(data);
+    const bars = vizBar.querySelectorAll('span');
+    bars.forEach((bar, i) => {
+      const idx = Math.floor((i / bars.length) * data.length);
+      const val = data[idx] / 255;
+      bar.style.transform = `scaleY(${0.1 + val * 0.9})`;
+    });
+    vizBar.classList.add('active');
+  } else {
+    vizBar.classList.remove('active');
+  }
+  requestAnimationFrame(updateViz);
+}
+updateViz();
+
+// ---- Call duration timer ----
+durationInterval = setInterval(() => {
+  const elapsed = Math.floor((Date.now() - callStartTime) / 1000);
+  const min = Math.floor(elapsed / 60);
+  const sec = elapsed % 60;
+  callDuration.textContent = `${min}:${sec.toString().padStart(2, '0')}`;
+}, 1000);
+
+// ---- Character switching ----
+function switchChar(char) {
+  currentChar = char;
+  const cfg = charConfig[char];
+  avatarFull.src = cfg.img;
+  callerName.textContent = cfg.name;
+  conversationHistory = [];
+  
+  document.querySelectorAll('.char-opt').forEach(el => {
+    el.classList.toggle('active', el.dataset.char === char);
+  });
+  charSwitcher.classList.remove('show');
+}
+
+btnSwitch.addEventListener('click', () => {
+  charSwitcher.classList.toggle('show');
+});
+
+callScreen.addEventListener('click', (e) => {
+  if (!e.target.closest('.char-switcher') && !e.target.closest('.ctrl-btn')) {
+    charSwitcher.classList.remove('show');
+  }
+});
+
+// ---- TTS ----
+async function speak(text) {
+  const cfg = charConfig[currentChar];
+  isSpeaking = true;
+  callScreen.classList.add('speaking');
+  callStatus.classList.add('hidden');
+
+  try {
+    const resp = await fetch(`${API_BASE}/api/tts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, voice: cfg.voice })
+    });
+
+    if (!resp.ok) throw new Error('TTS failed');
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+
+    if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+    const audio = new Audio(url);
+    currentAudio = audio;
+
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const source = audioCtx.createMediaElementSource(audio);
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 128;
+    source.connect(analyser);
+    analyser.connect(audioCtx.destination);
+
+    audio.onended = () => {
+      isSpeaking = false;
+      callScreen.classList.remove('speaking');
+      URL.revokeObjectURL(url);
+      currentAudio = null;
+    };
+
+    await audio.play();
+  } catch (e) {
+    console.error('TTS error:', e);
+    isSpeaking = false;
+    callScreen.classList.remove('speaking');
+  }
+}
+
+// ---- Chat ----
+async function chat(message) {
+  const cfg = charConfig[currentChar];
+  transcript.innerHTML = `<span class="you">You: ${message}</span>`;
+  
+  try {
+    const resp = await fetch(`${API_BASE}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message, voice: cfg.persona, history: conversationHistory.slice(-6) })
+    });
+
+    const data = await resp.json();
+    const reply = data.reply || "Sorry, I got nothing on that one.";
+
+    conversationHistory.push({ role: 'user', content: message });
+    conversationHistory.push({ role: 'assistant', content: reply });
+
+    transcript.innerHTML = reply;
+    setTimeout(() => { transcript.innerHTML = ''; }, 8000);
+
+    await speak(reply);
+  } catch (e) {
+    console.error('Chat error:', e);
+    transcript.innerHTML = '⚠️ Connection lost';
+  }
+}
+
+// ---- Speech Recognition ----
+let recognition = null;
+if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  recognition = new SR();
+  recognition.continuous = false;
+  recognition.interimResults = true;
+  recognition.lang = 'en-US';
+
+  recognition.onresult = (e) => {
+    const text = Array.from(e.results).map(r => r[0].transcript).join('');
+    transcript.innerHTML = `<span class="you">${text}</span>`;
+    if (e.results[e.results.length - 1].isFinal) {
+      recognition.stop();
+    }
+  };
+
+  recognition.onend = () => {
+    isListening = false;
+    btnMic.classList.remove('active');
+    listeningIndicator.classList.remove('active');
+    const text = transcript.textContent.trim();
+    if (text) chat(text);
+  };
+
+  recognition.onerror = (e) => {
+    isListening = false;
+    btnMic.classList.remove('active');
+    listeningIndicator.classList.remove('active');
+    if (e.error === 'no-speech') {
+      callStatus.textContent = 'Didn\'t catch that — try again';
+      callStatus.classList.remove('hidden');
+    }
+  };
+}
+
+btnMic.addEventListener('click', () => {
+  if (audioCtx) audioCtx.resume();
+  
+  if (currentAudio) { currentAudio.pause(); currentAudio = null; isSpeaking = false; callScreen.classList.remove('speaking'); }
+
+  if (isListening) {
+    recognition.stop();
+    return;
+  }
+
+  if (recognition) {
+    isListening = true;
+    btnMic.classList.add('active');
+    listeningIndicator.classList.add('active');
+    callStatus.classList.add('hidden');
+    transcript.innerHTML = '';
+    recognition.start();
+  }
+});
+
+// ---- End call ----
+btnEnd.addEventListener('click', () => {
+  if (currentAudio) { currentAudio.pause(); }
+  if (recognition && isListening) { recognition.stop(); }
+  window.location.href = 'index.html';
+});
+
+// Hide status after first interaction
+callStatus.textContent = 'Tap 🎤 to talk';
+</script>
+</body>
+</html>
