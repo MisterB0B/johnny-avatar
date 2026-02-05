@@ -247,13 +247,9 @@
 <div class="header">
   <h1>⚡ JOHNNY</h1>
   <select class="voice-select" id="voiceSelect">
+    <option value="johnny-robot">🤖 Johnny — Robot</option>
+    <option value="johnny-human">🧑 Johnny — Human</option>
     <option value="scott-adams">📐 Scott Adams</option>
-    <option value="mike-rowe">🔧 Mike Rowe</option>
-    <option value="johnny5">🤖 Johnny 5</option>
-    <option value="mark-dancer">🎭 Mark Dancer</option>
-    <option value="jack-marlowe">🎬 Jack Marlowe</option>
-    <option value="burt">📖 Burt</option>
-    <option value="angelo">💪 Angelo</option>
   </select>
 </div>
 
@@ -295,12 +291,18 @@ let audioCtx = null;
 let analyser = null;
 let currentAudio = null;
 
-// ---- Avatar images per voice ----
+// ---- Avatar images + voice mapping ----
 const avatarImages = {
-  'mike-rowe': 'avatar-mikerowe.png',
+  'johnny-robot': 'avatar-robot.png',
+  'johnny-human': 'avatar-mikerowe.png',
   'scott-adams': 'avatar-scottadams.png',
-  'johnny5': 'avatar-robot.png',
-  'default': 'avatar-mikerowe.png'
+};
+
+// Johnny uses Mike Rowe's voice; Scott Adams uses his own
+const voiceMap = {
+  'johnny-robot': 'mike-rowe',
+  'johnny-human': 'mike-rowe',
+  'scott-adams': 'scott-adams',
 };
 
 // Load avatar on voice change
@@ -391,7 +393,8 @@ function setSpeaking(val) {
 }
 
 async function speak(text) {
-  const voice = voiceSelect.value;
+  const selection = voiceSelect.value;
+  const voice = voiceMap[selection] || 'mike-rowe';
   setStatus('Speaking...', 'active');
   setSpeaking(true);
 
@@ -447,11 +450,14 @@ async function sendMessage() {
   setStatus('Thinking...', 'active');
 
   try {
-    const voice = voiceSelect.value;
+    const selection = voiceSelect.value;
+    const voice = voiceMap[selection] || 'mike-rowe';
+    // Use persona based on character, not voice
+    const persona = selection.startsWith('johnny') ? 'johnny' : voice;
     const resp = await fetch(`${API_BASE}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: text, voice, history: conversationHistory.slice(-6) })
+      body: JSON.stringify({ message: text, voice: persona, history: conversationHistory.slice(-6) })
     });
 
     const data = await resp.json();
